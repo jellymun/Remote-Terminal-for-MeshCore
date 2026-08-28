@@ -1,5 +1,7 @@
 # RemoteTerm for MeshCore
 
+> CHANGE (2026-08-28): The project now includes an optional web-based login flow (form + JWT cookie session) to replace site-wide HTTP Basic authentication for browser access. This was added on branch `feature/web-login-form` to avoid browser/EDGE CIS policy blocks on Basic auth. See the `app/auth.py` backend endpoints (`POST /api/login`, `POST /api/logout`, `GET /api/me`) and the frontend login page at `frontend/src/pages/Login.tsx`.
+
 Backend server + browser interface for MeshCore mesh radio networks, providing a rich, web-based power-user management and messaging system through a companion radio.
 
 Connect your radio over Serial, TCP, or BLE, and then you can:
@@ -16,12 +18,12 @@ Connect your radio over Serial, TCP, or BLE, and then you can:
 
 For advanced setup and troubleshooting see [README_ADVANCED.md](README_ADVANCED.md). If you plan to contribute, read [CONTRIBUTING.md](CONTRIBUTING.md).
 
-**Warning:** This app is for trusted environments only. _Do not put this on an untrusted network, or open it to the public._ You can optionally set `MESHCORE_BASIC_AUTH_USERNAME` and `MESHCORE_BASIC_AUTH_PASSWORD` for app-wide HTTP Basic auth, but that is only a coarse gate and must be paired with HTTPS. The bots can execute arbitrary Python code which means anyone who gets access to the app can, too. To completely disable the bot system, start the server with `MESHCORE_DISABLE_BOTS=true` — this prevents all bot execution and blocks bot configuration changes via the API. If you need stronger access control, consider using a reverse proxy like Nginx, or extending FastAPI; full access control and user management are outside the scope of this app.
+**Warning:** This app is for trusted environments only. _Do not put this on an untrusted network, or open it to the public._ You can optionally set `MESHCORE_BASIC_AUTH_USERNAME` and `MESHCORE_BAS[...]
 
 ![Screenshot of the application's web interface](app_screenshot.png)
 
 > [!WARNING]
-> RemoteTerm does *full* management of the radio, meaning that once a radio is connected to RemoteTerm, all contacts/channels will be imported and offloaded to RemoteTerm and the contacts actually synced to the device will be governed by RemoteTerm. This means that RemoteTerm can be a poor fit for users who are looking to swap radios in and out, maintaining radio state (favorites, channels, etc.) irrespective of app usage.
+> RemoteTerm does *full* management of the radio, meaning that once a radio is connected to RemoteTerm, all contacts/channels will be imported and offloaded to RemoteTerm and the contacts actually[...]
 
 ## Requirements
 
@@ -59,7 +61,7 @@ winget install usbipd
 # then find device ID
 usbipd list
 # make device shareable
-usbipd bind --busid 3-8 # (or whatever the right ID is)
+usbipd bind --wsl --busid 3-8 # (or whatever the right ID is)
 # attach device to WSL (run this each time you plug in the device)
 usbipd attach --wsl --busid 3-8
 # device will appear in WSL as /dev/ttyUSB0 or /dev/ttyACM0
@@ -85,7 +87,7 @@ Access the app at http://localhost:8000. Once the backend is running, the intera
 Source checkouts expect a normal frontend build in `frontend/dist`.
 
 > [!TIP]
-> Running on lightweight hardware, or just don't want to build the frontend locally? From a cloned checkout, run `python3 scripts/setup/fetch_prebuilt_frontend.py` to fetch and unpack a prebuilt frontend into `frontend/prebuilt`, then start the app normally with `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`.
+> Running on lightweight hardware, or just don't want to build the frontend locally? From a cloned checkout, run `python3 scripts/setup/fetch_prebuilt_frontend.py` to fetch and unpack a prebuilt f[...]
 
 > [!NOTE]
 > On Linux, you can also install RemoteTerm as a persistent `systemd` service that starts on boot and restarts automatically on failure:
@@ -100,9 +102,9 @@ Source checkouts expect a normal frontend build in `frontend/dist`.
 
 > **Warning:** Docker has had reports intermittent issues with serial event subscriptions. The native method above is more reliable.
 
-Local Docker builds are architecture-native by default. On Apple Silicon Macs and ARM64 Linux hosts such as Raspberry Pi, `docker compose build` / `docker compose up --build` will produce an ARM64 image unless you override the platform.
+Local Docker builds are architecture-native by default. On Apple Silicon Macs and ARM64 Linux hosts such as Raspberry Pi, `docker compose build` / `docker compose up --build` will produce an ARM6[...]
 
-For serial-device passthrough, use rootful Docker. In practice that usually means starting the stack with `sudo docker compose ...` unless your Docker daemon is already configured for rootful access via your user/group. Rootless Docker has been observed to fail on serial-device mappings even when the compose file itself is correct.
+For serial-device passthrough, use rootful Docker. In practice that usually means starting the stack with `sudo docker compose ...` unless your Docker daemon is already configured for rootful acc[...]
 
 Create a local `docker-compose.yml` in one of two ways:
 
@@ -118,11 +120,11 @@ cp docker-compose.example.yml docker-compose.yml
 bash scripts/setup/install_docker.sh
 ```
 
-> The interactive generator enables a self-signed (snakeoil) TLS certificate by default. If you accept the default, the app will be served over HTTPS and the generated compose file will include certificate mounts and an SSL command override. Decline if you prefer plain HTTP or plan to terminate TLS externally.
+> The interactive generator enables a self-signed (snakeoil) TLS certificate by default. If you accept the default, the app will be served over HTTPS and the generated compose file will include c[...]
 
 Your local `docker-compose.yml` is gitignored so future pulls don't overwrite your Docker settings.
 
-The guided Docker flow can collect BLE settings, but BLE access from Docker still needs manual compose customization such as Bluetooth passthrough and possibly privileged mode or host networking. If you want the simpler path for BLE, use the regular Python launch flow instead.
+The guided Docker flow can collect BLE settings, but BLE access from Docker still needs manual compose customization such as Bluetooth passthrough and possibly privileged mode or host networking.[...]
 
 Then customize the local compose file for your transport and launch:
 
@@ -159,7 +161,7 @@ Then run:
 sudo docker compose up -d --build
 ```
 
-The container runs as root by default for maximum serial passthrough compatibility across host setups. On Linux, if you switch between native and Docker runs, `./data` can end up root-owned. If you do not need that serial compatibility behavior, you can enable the optional `user: "${UID:-1000}:${GID:-1000}"` line in `docker-compose.yml` to keep ownership aligned with your host user.
+The container runs as root by default for maximum serial passthrough compatibility across host setups. On Linux, if you switch between native and Docker runs, `./data` can end up root-owned. If y[...]
 
 To stop:
 
@@ -207,7 +209,7 @@ Only one transport may be active at a time. If multiple are set, the server will
 | `MESHCORE_DISABLE_BOTS` | false | Disable bot system entirely (blocks execution and config; an intermediate security precaution, but not as good as basic auth) |
 | `MESHCORE_BASIC_AUTH_USERNAME` | | Optional app-wide HTTP Basic auth username; must be set together with `MESHCORE_BASIC_AUTH_PASSWORD` |
 | `MESHCORE_BASIC_AUTH_PASSWORD` | | Optional app-wide HTTP Basic auth password; must be set together with `MESHCORE_BASIC_AUTH_USERNAME` |
-| `MESHCORE_VAPID_SUBJECT` | `mailto:noreply@meshcore.local` | Subject (`sub`) claim for Web Push VAPID tokens; must be a `mailto:` or `https:` contact. Apple's push service rejects the default `.local` domain, so iOS/Safari users must set this to a real address (e.g. `mailto:you@example.com`). |
+| `MESHCORE_VAPID_SUBJECT` | `mailto:noreply@meshcore.local` | Subject (`sub`) claim for Web Push VAPID tokens; must be a `mailto:` or `https:` contact. Apple's push service rejects the default `[...]
 
 Common launch patterns:
 
@@ -230,15 +232,15 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 > [!WARNING]
-> **Windows + MQTT fanout:** Python's default Windows event loop (ProactorEventLoop) is not compatible with the MQTT libraries used by RemoteTerm. If you configure any MQTT integration, add `--loop none` to your uvicorn command:
+> **Windows + MQTT fanout:** Python's default Windows event loop (ProactorEventLoop) is not compatible with the MQTT libraries used by RemoteTerm. If you configure any MQTT integration, add `--lo[...]
 >
 > ```powershell
 > uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --loop none
-> ```
+> > ```
 >
-> If you forget, the app will start normally but MQTT connections will fail and you'll see a toast in the UI with this same guidance.
+>If you forget, the app will start normally but MQTT connections will fail and you'll see a toast in the UI with this same guidance.
 
-If you enable Basic Auth, protect the app with HTTPS. HTTP Basic credentials are not safe on plain HTTP. Also note that the app's permissive CORS policy is a deliberate trusted-network tradeoff, so cross-origin browser JavaScript is not a reliable way to use that Basic Auth gate.
+If you enable Basic Auth, protect the app with HTTPS. HTTP Basic credentials are not safe on plain HTTP. Also note that the app's permissive CORS policy is a deliberate trusted-network tradeoff, [...]
 
 ## Where To Go Next
 
@@ -247,8 +249,12 @@ If you enable Basic Auth, protect the app with HTTPS. HTTP Basic credentials are
 - Contributing, tests, linting, E2E notes, and important AGENTS files: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Live API docs after the backend is running: http://localhost:8000/docs
 
+## Acknowledgements
+
+- Thanks to the original project and its contributors (original repository: https://github.com/jkingsman/Remote-Terminal-for-MeshCore). This branch includes modifications to add a web-based login flow for environments where HTTP Basic is restricted.
+
 ## Disclaimer
 
-This is developed with very heavy agentic assistance -- there is no warranty of fitness for any purpose. It's been lovingly guided by an engineer with a passion for clean code and good tests, but it's still mostly LLM output, so you may find some bugs.
+This is developed with very heavy agentic assistance -- there is no warranty of fitness for any purpose. It's been lovingly guided by an engineer with a passion for clean code and good tests, but[...]
 
 If extending, have your LLM read the three `AGENTS.md` files: `./AGENTS.md`, `./frontend/AGENTS.md`, and `./app/AGENTS.md`.
