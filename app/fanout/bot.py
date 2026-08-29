@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from app.fanout.base import FanoutModule
 
@@ -47,12 +48,25 @@ class BotModule(FanoutModule):
     messages via ``on_message``, executes the bot's Python code in a
     background task (after a 2-second settle delay), and sends any response
     back through the radio.
+    
+    Channel filtering and rate limiting are applied based on bot config.
     """
 
     def __init__(self, config_id: str, config: dict, *, name: str = "Bot") -> None:
         super().__init__(config_id, config, name=name)
         self._tasks: set[asyncio.Task] = set()
         self._active = True
+        
+        # Extract channel filter config (safe defaults: empty allowlist, no DMs)
+        self._channel_filter = config.get("channel_filter", {})
+        self._filter_mode = self._channel_filter.get("mode", "allowlist")
+        self._allowed_channels = set(self._channel_filter.get("channels", []))
+        self._include_dms = self._channel_filter.get("include_dms", False)
+        
+        # Extract rate limit config (default: 10 messages per 60 seconds)
+        self._rate_limit = config.get("rate_limit", {})
+        self._rate_limit_messages = self._rate_limit.get("messages_per_60sec", 10)
+        self._message_timestamps: list[float] = []
 
     async def stop(self) -> None:
         self._active = False
@@ -63,8 +77,84 @@ class BotModule(FanoutModule):
             await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
 
+    def _should_process_message(self, data: dict) -> bool:
+        """Check if message passes channel filter."""
+        msg_type = data.get("type", "")
+        is_dm = msg_type == "PRIV"
+        conversation_key = data.get("conversation_key", "")
+        
+        # Filter DMs based on include_dms flag
+        if is_dm:
+            if not self._include_dms:
+                logger.debug(
+                    "Bot '%s' filtered DM from %s (include_dms=false)",
+                    self.name,
+                    conversation_key[:12] if conversation_key else "(unknown)",
+                )
+                return False
+            return True
+        
+        # Filter channels based on allowlist/blocklist mode
+        if self._filter_mode == "allowlist":
+            if conversation_key not in self._allowed_channels:
+                logger.debug(
+                    "Bot '%s' filtered channel message from %s (not in allowlist)",
+                    self.name,
+                    conversation_key[:12] if conversation_key else "(unknown)",
+                )
+                return False
+        elif self._filter_mode == "blocklist":
+            if conversation_key in self._allowed_channels:
+                logger.debug(
+                    "Bot '%s' filtered channel message from %s (in blocklist)",
+                    self.name,
+                    conversation_key[:12] if conversation_key else "(unknown)",
+                )
+                return False
+        # mode == "all" passes everything (already filtered by DMs above)
+        
+        return True
+    
+    def _check_rate_limit(self) -> bool:
+        """Check if rate limit allows processing this message.
+        
+        Returns True if message should be processed, False if rate limit exceeded.
+        Prunes old timestamps outside the 60-second window.
+        """
+        now = time.monotonic()
+        window_start = now - 60.0
+        
+        # Remove timestamps outside the 60-second window
+        self._message_timestamps = [ts for ts in self._message_timestamps if ts > window_start]
+        
+        # Check if we've exceeded the limit
+        if len(self._message_timestamps) >= self._rate_limit_messages:
+            logger.debug(
+                "Bot '%s' rate limited: %d messages in last 60s (limit: %d)",
+                self.name,
+                len(self._message_timestamps),
+                self._rate_limit_messages,
+            )
+            return False
+        
+        # Record this message
+        self._message_timestamps.append(now)
+        return True
+
     async def on_message(self, data: dict) -> None:
-        """Kick off bot execution in a background task so we don't block dispatch."""
+        """Kick off bot execution in a background task so we don't block dispatch.
+        
+        Messages are filtered by channel allowlist/blocklist and rate-limited
+        before execution is scheduled.
+        """
+        # Apply channel filter
+        if not self._should_process_message(data):
+            return
+        
+        # Apply rate limiting
+        if not self._check_rate_limit():
+            return
+        
         task = asyncio.create_task(self._run_for_message(data))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -186,4 +276,5 @@ class BotModule(FanoutModule):
 
     @property
     def status(self) -> str:
+        """Return module status."""
         return "connected"

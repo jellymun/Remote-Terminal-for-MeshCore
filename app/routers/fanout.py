@@ -40,6 +40,11 @@ _COMMUNITY_MQTT_TEMPLATE_FIELD_CANONICAL = {
 _ALLOWED_COMMUNITY_MQTT_TRANSPORTS = {"tcp", "websockets"}
 _ALLOWED_COMMUNITY_MQTT_AUTH_MODES = {"token", "password", "none"}
 
+# Bot rate limiting constants
+DEFAULT_BOT_RATE_LIMIT_PER_60SEC = 10
+MIN_BOT_RATE_LIMIT = 1
+MAX_BOT_RATE_LIMIT = 1000
+
 
 def _normalize_community_topic_template(topic_template: str) -> str:
     """Normalize Community MQTT topic template placeholders to canonical uppercase form."""
@@ -180,7 +185,7 @@ def _validate_mqtt_community_config(config: dict) -> None:
 
 
 def _validate_bot_config(config: dict) -> None:
-    """Validate bot config blob (syntax-check the code and supported signature)."""
+    """Validate bot config blob (syntax-check the code, signature, and channel filter)."""
     code = config.get("code", "")
     if not code or not code.strip():
         raise HTTPException(status_code=400, detail="Bot code cannot be empty")
@@ -251,6 +256,51 @@ def _validate_bot_config(config: dict) -> None:
         _analyze_bot_signature(inspect.Signature(parameters))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
+    
+    # Validate channel_filter config
+    channel_filter = config.get("channel_filter", {})
+    if channel_filter and isinstance(channel_filter, dict):
+        mode = channel_filter.get("mode", "allowlist")
+        if mode not in ("allowlist", "blocklist", "all"):
+            raise HTTPException(
+                status_code=400,
+                detail="channel_filter.mode must be 'allowlist', 'blocklist', or 'all'",
+            )
+        
+        channels = channel_filter.get("channels", [])
+        if not isinstance(channels, list):
+            raise HTTPException(
+                status_code=400,
+                detail="channel_filter.channels must be a list of channel keys",
+            )
+        
+        # Warn if allowlist mode with empty channels (bot will receive nothing)
+        if mode == "allowlist" and not channels:
+            logger.warning(
+                "Bot config creates bot with empty allowlist; bot will not respond to any messages"
+            )
+        
+        include_dms = channel_filter.get("include_dms", False)
+        if not isinstance(include_dms, bool):
+            raise HTTPException(
+                status_code=400,
+                detail="channel_filter.include_dms must be a boolean",
+            )
+    
+    # Validate rate_limit config
+    rate_limit = config.get("rate_limit", {})
+    if rate_limit and isinstance(rate_limit, dict):
+        messages_per_60sec = rate_limit.get("messages_per_60sec", DEFAULT_BOT_RATE_LIMIT_PER_60SEC)
+        if not isinstance(messages_per_60sec, int):
+            raise HTTPException(
+                status_code=400,
+                detail="rate_limit.messages_per_60sec must be an integer",
+            )
+        if messages_per_60sec < MIN_BOT_RATE_LIMIT or messages_per_60sec > MAX_BOT_RATE_LIMIT:
+            raise HTTPException(
+                status_code=400,
+                detail=f"rate_limit.messages_per_60sec must be between {MIN_BOT_RATE_LIMIT} and {MAX_BOT_RATE_LIMIT}",
+            )
 
 
 def _validate_apprise_config(config: dict) -> None:
